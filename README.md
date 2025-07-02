@@ -20,3 +20,8 @@
 Установите зависимости:
 ```bash
 pip install -r requirements.txt
+
+
+git remote add origin https://github.com/andreas-neuronet/telegram-ai-bot-image.git
+git branch -M main
+git push -u origin main
