@@ -1,0 +1,32 @@
+name: Daily Image Generation and Telegram Post
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # каждый день в 9:00 UTC
+  workflow_dispatch:     # возможность запустить вручную
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Load environment variables
+        run: |
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+          echo "TELEGRAM_CHANNEL_ID=${{ secrets.TELEGRAM_CHANNEL_ID }}" >> .env
+
+      - name: Run image generation
+        run: python generate_images.py

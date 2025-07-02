@@ -1,0 +1,32 @@
+# === Python ===
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+
+# === Виртуальное окружение ===
+venv/
+env/
+.env
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
+
+# === Логи и кэши ===
+logs/
+*.log
+*.pot
+*.pid
+*.seed
+*.pid.lock
+
+# === Изображения и данные ===
+image/
+output/
+
+# === Системные файлы ===
+.DS_Store
+Thumbs.db
