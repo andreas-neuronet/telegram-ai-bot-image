@@ -73,30 +73,14 @@ def load_prompts():
 
 def remove_first_prompt():
     try:
-        # Читаем все строки из файла
         with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+            prompts = [line.strip() for line in f if line.strip()]
         
-        # Находим индекс первой непустой строки
-        first_non_empty = None
-        for i, line in enumerate(lines):
-            if line.strip():  # Если строка не пустая
-                first_non_empty = i
-                break
-        
-        if first_non_empty is not None:
-            # Удаляем первую непустую строку
-            del lines[first_non_empty]
-            
-            # Перезаписываем файл
+        if prompts:
             with open(INPUT_FILENAME, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            print("✅ Первый промпт успешно удален из файла.")
-        else:
-            print("ℹ️ Файл промптов пуст, нечего удалять.")
+                f.write("\n".join(prompts[1:]))
     except Exception as e:
         print(f"❌ Ошибка при обновлении файла промптов: {e}")
-        logging.error(f"Error updating prompts file: {e}")
 
 def send_to_telegram(image_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
