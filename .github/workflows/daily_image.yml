@@ -1,9 +1,9 @@
-name: Daily Image Generation and Telegram Post
+name: Hourly Image Generation
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # каждый день в 9:00 UTC
-  workflow_dispatch:     # возможность запустить вручную
+    - cron: '0 16-23,0-15 * * *'  # Каждый час с 16:00 до 15:00 UTC (19:00-18:00 МСК)
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install gradio_client python-dotenv Pillow requests
 
       - name: Load environment variables
         run: |

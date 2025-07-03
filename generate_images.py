@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from PIL import Image
 import requests
 import logging
+from datetime import datetime
 
 # === Настройки логирования ===
 logging.basicConfig(filename='app.log', level=logging.INFO, 
@@ -21,9 +22,6 @@ if not HF_TOKEN:
     raise ValueError("❌ Не найден HF_TOKEN в .env файле.")
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
     raise ValueError("❌ Не найдены TELEGRAM_BOT_TOKEN или TELEGRAM_CHANNEL_ID в .env файле.")
-
-print(f"TELEGRAM_BOT_TOKEN: {TELEGRAM_BOT_TOKEN[:5]}... (скрыт)")
-print(f"TELEGRAM_CHANNEL_ID: {TELEGRAM_CHANNEL_ID}")
 
 # === Настройки ===
 MODEL_FILE = "MODEL.txt"
@@ -64,29 +62,32 @@ def get_working_model():
 
     raise ValueError("❌ Ни одна из моделей не доступна!")
 
-# === Основной процесс ===
-MODEL_NAME = get_working_model()
-print(f"✅ Использую модель: {MODEL_NAME}")
-client = Client(MODEL_NAME, hf_token=HF_TOKEN)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+def load_prompts():
+    try:
+        with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
+            prompts = [line.strip() for line in f if line.strip()]
+            return prompts
+    except FileNotFoundError:
+        print(f"❌ Файл {INPUT_FILENAME} не найден.")
+        return []
 
-try:
-    with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
-        prompts = [line.strip() for line in f if line.strip()]
-except FileNotFoundError:
-    print(f"❌ Файл {INPUT_FILENAME} не найден.")
-    exit()
+def remove_first_prompt():
+    try:
+        with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
+            prompts = [line.strip() for line in f if line.strip()]
+        
+        if prompts:
+            with open(INPUT_FILENAME, "w", encoding="utf-8") as f:
+                f.write("\n".join(prompts[1:]))
+    except Exception as e:
+        print(f"❌ Ошибка при обновлении файла промптов: {e}")
 
-def send_to_telegram(image_path, caption=""):
+def send_to_telegram(image_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(image_path, "rb") as photo:
             files = {"photo": photo}
-            data = {
-                "chat_id": TELEGRAM_CHANNEL_ID,
-                "caption": caption[:200],  # ограничение длины текста
-                "parse_mode": "Markdown"
-            }
+            data = {"chat_id": TELEGRAM_CHANNEL_ID}
             response = requests.post(url, data=data, files=files)
             
             if response.status_code == 200:
@@ -104,11 +105,23 @@ def send_to_telegram(image_path, caption=""):
         logging.exception("Telegram send error")
         return False
 
-for idx, prompt in enumerate(prompts):
-    print(f"\n🔄 [{idx + 1}/{len(prompts)}] Генерация: «{prompt}»")
+def generate_and_send_image():
+    # Инициализация модели
+    model_name = get_working_model()
+    print(f"✅ Использую модель: {model_name}")
+    client = Client(model_name, hf_token=HF_TOKEN)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    prompts = load_prompts()
+    if not prompts:
+        print("❌ Нет доступных промптов для обработки.")
+        return
+    
+    prompt = prompts[0]
+    print(f"\n🔄 Генерация: «{prompt}»")
     try:
         # Параметры для FLUX.1-schnell
-        if "FLUX.1-schnell" in MODEL_NAME:
+        if "FLUX.1-schnell" in model_name:
             result = client.predict(
                 prompt=prompt,
                 api_name="/infer"
@@ -126,7 +139,8 @@ for idx, prompt in enumerate(prompts):
 
         temp_image_path = result[0]
         safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " _-")
-        output_path = os.path.join(OUTPUT_DIR, f"{idx + 1}_{safe_prompt}.png")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join(OUTPUT_DIR, f"{timestamp}_{safe_prompt}.png")
 
         # Конвертация
         with Image.open(temp_image_path) as img:
@@ -137,9 +151,10 @@ for idx, prompt in enumerate(prompts):
         # Отправка в Telegram
         if os.path.exists(output_path):
             print(f"📤 Отправляем в Telegram: {output_path}")
-            success = send_to_telegram(output_path, caption=f"🖼️ {prompt}")
+            success = send_to_telegram(output_path)
             if success:
                 print("✅ Успешно отправлено в Telegram")
+                remove_first_prompt()
             else:
                 print("❌ Не удалось отправить в Telegram")
         else:
@@ -149,4 +164,15 @@ for idx, prompt in enumerate(prompts):
         print(f"❌ Ошибка: {str(e)}")
         logging.exception(f"Error processing prompt '{prompt}': {e}")
 
-print("\n🎉 Обработка завершена!")
+def should_publish_now():
+    now = datetime.now()
+    current_hour = now.hour
+    # Публиковать с 19:00 до 18:00 следующего дня (по МСК)
+    return current_hour >= 19 or current_hour < 19
+
+if __name__ == "__main__":
+    print("\n🎉 Скрипт запущен. Проверка необходимости публикации...")
+    if should_publish_now():
+        generate_and_send_image()
+    else:
+        print("⏳ Сейчас не время публикации (работаем с 19:00 до 18:00)")
