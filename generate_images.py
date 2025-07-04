@@ -7,10 +7,13 @@ import logging
 from datetime import datetime
 
 # === Настройки логирования ===
-logging.basicConfig(filename='app.log', level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-# === Загрузка токена из .env ===
+# === Загрузка окружения ===
 load_dotenv()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -26,7 +29,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
 # === Настройки ===
 MODEL_FILE = "MODEL.txt"
 INPUT_FILENAME = "input.txt"
-OUTPUT_DIR = "image"
+OUTPUT_DIR = "images"
 
 # === Резервные модели ===
 BACKUP_MODELS = [
@@ -36,113 +39,105 @@ BACKUP_MODELS = [
 ]
 
 def get_working_model():
+    """Возвращает первую рабочую модель из списка"""
+    model_list = []
+    
+    # Чтение моделей из файла
     if os.path.exists(MODEL_FILE):
         try:
             with open(MODEL_FILE, "r", encoding="utf-8") as f:
-                models = [line.strip() for line in f if line.strip()]
-                for model in models:
-                    try:
-                        print(f"🔄 Проверка модели: {model}")
-                        Client(model, hf_token=HF_TOKEN)
-                        return model
-                    except Exception as e:
-                        print(f"❌ Модель {model} недоступна: {e}")
-                        continue
+                model_list = [line.strip() for line in f if line.strip()]
         except Exception as e:
-            print(f"❌ Ошибка чтения файла моделей: {e}")
-
-    print("⚠️ Использую резервные модели...")
-    for model in BACKUP_MODELS:
+            print(f"⚠️ Ошибка чтения {MODEL_FILE}: {e}")
+    
+    # Добавляем резервные модели
+    model_list.extend(BACKUP_MODELS)
+    
+    # Проверяем доступность моделей
+    for model in model_list:
         try:
+            print(f"🔄 Проверка модели: {model}")
             Client(model, hf_token=HF_TOKEN)
             return model
         except Exception as e:
-            print(f"❌ Резервная модель {model} недоступна: {e}")
+            print(f"❌ Модель {model} недоступна: {str(e)[:200]}")
             continue
-
+    
     raise ValueError("❌ Ни одна из моделей не доступна!")
 
 def load_prompts():
+    """Загружает промпты из файла"""
     try:
         with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
-            prompts = [line.strip() for line in f if line.strip()]
-            return prompts
+            return [line.strip() for line in f if line.strip()]
     except FileNotFoundError:
-        print(f"❌ Файл {INPUT_FILENAME} не найден.")
+        print(f"❌ Файл {INPUT_FILENAME} не найден")
+        return []
+    except Exception as e:
+        print(f"❌ Ошибка чтения промптов: {e}")
         return []
 
 def remove_first_prompt():
+    """Удаляет первую строку из файла промптов"""
     try:
-        # Читаем все строки из файла
-        with open(INPUT_FILENAME, "r", encoding="utf-8") as f:
+        # Получаем абсолютный путь
+        input_path = os.path.abspath(INPUT_FILENAME)
+        
+        # Читаем текущее содержимое
+        with open(input_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         
-        # Находим индекс первой непустой строки
-        first_non_empty = None
-        for i, line in enumerate(lines):
-            if line.strip():  # Если строка не пустая
-                first_non_empty = i
-                break
+        # Если файл пуст
+        if not lines:
+            print("ℹ️ Файл промптов пуст")
+            return True
         
-        if first_non_empty is not None:
-            # Удаляем первую непустую строку
-            del lines[first_non_empty]
-            
-            # Перезаписываем файл
-            with open(INPUT_FILENAME, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            print("✅ Первый промпт успешно удален из файла.")
-        else:
-            print("ℹ️ Файл промптов пуст, нечего удалять.")
+        # Удаляем первую строку
+        with open(input_path, "w", encoding="utf-8") as f:
+            f.writelines(lines[1:])
+        
+        print(f"✅ Удален первый промпт. Осталось {len(lines)-1} строк.")
+        return True
+    
+    except PermissionError:
+        print("❌ Ошибка: Нет прав на запись в файл")
+        return False
     except Exception as e:
-        print(f"❌ Ошибка при обновлении файла промптов: {e}")
-        logging.error(f"Error updating prompts file: {e}")
+        print(f"❌ Ошибка при обновлении файла: {e}")
+        return False
 
 def send_to_telegram(image_path):
+    """Отправляет изображение в Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(image_path, "rb") as photo:
-            files = {"photo": photo}
-            data = {"chat_id": TELEGRAM_CHANNEL_ID}
-            response = requests.post(url, data=data, files=files)
+            response = requests.post(
+                url,
+                files={"photo": photo},
+                data={"chat_id": TELEGRAM_CHANNEL_ID}
+            )
             
             if response.status_code == 200:
-                print("✅ Успешно отправлено в Telegram!")
-                logging.info(f"Sent to Telegram: {image_path}")
+                print("✅ Изображение отправлено в Telegram")
                 return True
             else:
-                error_text = response.text
-                print(f"❌ Ошибка при отправке в Telegram: код {response.status_code}")
-                print("Ответ сервера:", error_text)
-                logging.error(f"Telegram error: {error_text}")
+                print(f"❌ Ошибка Telegram API: {response.status_code}")
+                print(response.text[:200])
                 return False
     except Exception as e:
-        print(f"⚠️ Исключение при отправке в Telegram: {e}")
-        logging.exception("Telegram send error")
+        print(f"❌ Ошибка отправки в Telegram: {e}")
         return False
 
-def generate_and_send_image():
-    # Инициализация модели
-    model_name = get_working_model()
-    print(f"✅ Использую модель: {model_name}")
-    client = Client(model_name, hf_token=HF_TOKEN)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    prompts = load_prompts()
-    if not prompts:
-        print("❌ Нет доступных промптов для обработки.")
-        return
-    
-    prompt = prompts[0]
-    print(f"\n🔄 Генерация: «{prompt}»")
+def generate_image(client, prompt, model_name):
+    """Генерирует изображение по промпту"""
     try:
-        # Параметры для FLUX.1-schnell
+        # Параметры для разных моделей
         if "FLUX.1-schnell" in model_name:
             result = client.predict(
                 prompt=prompt,
                 api_name="/infer"
             )
-        else:  # Параметры для других моделей
+        else:
             result = client.predict(
                 prompt=prompt,
                 seed=0,
@@ -152,43 +147,73 @@ def generate_and_send_image():
                 num_inference_steps=28,
                 api_name="/infer"
             )
-
-        temp_image_path = result[0]
-        safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " _-")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(OUTPUT_DIR, f"{timestamp}_{safe_prompt}.png")
-
-        # Конвертация
-        with Image.open(temp_image_path) as img:
-            img.save(output_path, "PNG", quality=100)
-        print(f"🖼️ Сохранено как PNG: {output_path}")
-        logging.info(f"Image saved: {output_path}")
-
-        # Отправка в Telegram
-        if os.path.exists(output_path):
-            print(f"📤 Отправляем в Telegram: {output_path}")
-            success = send_to_telegram(output_path)
-            if success:
-                print("✅ Успешно отправлено в Telegram")
-                remove_first_prompt()
-            else:
-                print("❌ Не удалось отправить в Telegram")
-        else:
-            print(f"❌ Файл {output_path} не существует для отправки")
-
+        
+        return result[0]  # Возвращаем временный путь к изображению
     except Exception as e:
-        print(f"❌ Ошибка: {str(e)}")
-        logging.exception(f"Error processing prompt '{prompt}': {e}")
+        print(f"❌ Ошибка генерации: {e}")
+        return None
+
+def save_image(temp_path, prompt):
+    """Сохраняет изображение в постоянное хранилище"""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # Создаем безопасное имя файла
+    safe_prompt = "".join(
+        c for c in prompt[:30] 
+        if c.isalnum() or c in " _-"
+    ).rstrip()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = os.path.join(OUTPUT_DIR, f"{timestamp}_{safe_prompt}.png")
+    
+    try:
+        with Image.open(temp_path) as img:
+            img.save(output_path, "PNG", quality=95)
+        print(f"🖼️ Изображение сохранено: {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"❌ Ошибка сохранения: {e}")
+        return None
 
 def should_publish_now():
+    """Проверяет, нужно ли публиковать сейчас"""
     now = datetime.now()
-    current_hour = now.hour
-    # Публиковать с 19:00 до 18:00 следующего дня (по МСК)
-    return current_hour >= 19 or current_hour < 19
+    return now.hour >= 19 or now.hour < 19  # С 19:00 до 18:00
+
+def main():
+    print("\n🚀 Запуск генерации изображений")
+    
+    if not should_publish_now():
+        print("⏳ Сейчас не время публикации")
+        return
+    
+    # Инициализация модели
+    model_name = get_working_model()
+    print(f"🔧 Используется модель: {model_name}")
+    client = Client(model_name, hf_token=HF_TOKEN)
+    
+    # Загрузка промптов
+    prompts = load_prompts()
+    if not prompts:
+        print("❌ Нет промптов для обработки")
+        return
+    
+    prompt = prompts[0]
+    print(f"\n🎨 Генерация: «{prompt}»")
+    
+    # Генерация изображения
+    temp_image_path = generate_image(client, prompt, model_name)
+    if not temp_image_path:
+        return
+    
+    # Сохранение изображения
+    final_image_path = save_image(temp_image_path, prompt)
+    if not final_image_path:
+        return
+    
+    # Отправка в Telegram
+    if send_to_telegram(final_image_path):
+        # Удаляем обработанный промпт только после успешной отправки
+        remove_first_prompt()
 
 if __name__ == "__main__":
-    print("\n🎉 Скрипт запущен. Проверка необходимости публикации...")
-    if should_publish_now():
-        generate_and_send_image()
-    else:
-        print("⏳ Сейчас не время публикации (работаем с 19:00 до 18:00)")
+    main()
