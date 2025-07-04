@@ -8,9 +8,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Необходимо для пуша в репозиторий
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Чтобы git push работал
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -30,3 +36,11 @@ jobs:
 
       - name: Run image generation
         run: python generate_images.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add input.txt
+          git diff-index --quiet HEAD || git commit -m "Update input.txt after image generation"
+          git push origin main
