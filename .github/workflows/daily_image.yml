@@ -2,7 +2,7 @@ name: Hourly Image Generation
 
 on:
   schedule:
-    - cron: '0 16-23,0-15 * * *'  # Каждый час с 16:00 до 15:00 UTC (19:00-18:00 МСК)
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
