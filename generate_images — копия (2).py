@@ -5,7 +5,6 @@ from PIL import Image
 import requests
 import logging
 from datetime import datetime
-import time
 
 # === Настройки логирования ===
 logging.basicConfig(
@@ -39,8 +38,8 @@ BACKUP_MODELS = [
     "runwayml/stable-diffusion-v1-5"
 ]
 
-def get_model_list():
-    """Возвращает список моделей: из файла + резервные"""
+def get_working_model():
+    """Возвращает первую рабочую модель из списка"""
     model_list = []
     
     # Чтение моделей из файла
@@ -54,7 +53,17 @@ def get_model_list():
     # Добавляем резервные модели
     model_list.extend(BACKUP_MODELS)
     
-    return list(set(model_list))  # удаляем дубликаты
+    # Проверяем доступность моделей
+    for model in model_list:
+        try:
+            print(f"🔄 Проверка модели: {model}")
+            Client(model, hf_token=HF_TOKEN)
+            return model
+        except Exception as e:
+            print(f"❌ Модель {model} недоступна: {str(e)[:200]}")
+            continue
+    
+    raise ValueError("❌ Ни одна из моделей не доступна!")
 
 def load_prompts():
     """Загружает промпты из файла"""
@@ -71,15 +80,19 @@ def load_prompts():
 def remove_first_prompt():
     """Удаляет первую строку из файла промптов"""
     try:
+        # Получаем абсолютный путь
         input_path = os.path.abspath(INPUT_FILENAME)
         
+        # Читаем текущее содержимое
         with open(input_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         
+        # Если файл пуст
         if not lines:
             print("ℹ️ Файл промптов пуст")
             return True
         
+        # Удаляем первую строку
         with open(input_path, "w", encoding="utf-8") as f:
             f.writelines(lines[1:])
         
@@ -95,7 +108,7 @@ def remove_first_prompt():
 
 def send_to_telegram(image_path):
     """Отправляет изображение в Telegram"""
-    url = f"https://api.telegram.org/bot {TELEGRAM_BOT_TOKEN}/sendPhoto"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(image_path, "rb") as photo:
             response = requests.post(
@@ -120,7 +133,10 @@ def generate_image(client, prompt, model_name):
     try:
         # Параметры для разных моделей
         if "FLUX.1-schnell" in model_name:
-            result = client.predict(prompt=prompt, api_name="/infer")
+            result = client.predict(
+                prompt=prompt,
+                api_name="/infer"
+            )
         else:
             result = client.predict(
                 prompt=prompt,
@@ -141,7 +157,11 @@ def save_image(temp_path, prompt):
     """Сохраняет изображение в постоянное хранилище"""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " _-").rstrip()
+    # Создаем безопасное имя файла
+    safe_prompt = "".join(
+        c for c in prompt[:30] 
+        if c.isalnum() or c in " _-"
+    ).rstrip()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(OUTPUT_DIR, f"{timestamp}_{safe_prompt}.png")
     
@@ -165,42 +185,35 @@ def main():
     if not should_publish_now():
         print("⏳ Сейчас не время публикации")
         return
-
+    
+    # Инициализация модели
+    model_name = get_working_model()
+    print(f"🔧 Используется модель: {model_name}")
+    client = Client(model_name, hf_token=HF_TOKEN)
+    
+    # Загрузка промптов
     prompts = load_prompts()
     if not prompts:
         print("❌ Нет промптов для обработки")
         return
-
+    
     prompt = prompts[0]
-    models = get_model_list()
-    success = False
-
-    for model_name in models:
-        print(f"\n🔧 Попытка использовать модель: {model_name}")
-
-        try:
-            client = Client(model_name, hf_token=HF_TOKEN)
-            temp_image_path = generate_image(client, prompt, model_name)
-
-            if temp_image_path:
-                final_image_path = save_image(temp_image_path, prompt)
-                if final_image_path and send_to_telegram(final_image_path):
-                    remove_first_prompt()
-                    success = True
-                    break  # Выходим после первого успеха
-                else:
-                    print("⚠️ Ошибка отправки или сохранения, пробуем другую модель...")
-            else:
-                print("⚠️ Генерация не удалась, пробуем другую модель...")
-
-            time.sleep(2)  # Небольшая задержка перед следующей попыткой
-
-        except Exception as e:
-            print(f"❌ Ошибка с моделью {model_name}: {str(e)[:200]}")
-            continue
-
-    if not success:
-        print("❌ Ни одна модель не смогла сгенерировать изображение.")
+    print(f"\n🎨 Генерация: «{prompt}»")
+    
+    # Генерация изображения
+    temp_image_path = generate_image(client, prompt, model_name)
+    if not temp_image_path:
+        return
+    
+    # Сохранение изображения
+    final_image_path = save_image(temp_image_path, prompt)
+    if not final_image_path:
+        return
+    
+    # Отправка в Telegram
+    if send_to_telegram(final_image_path):
+        # Удаляем обработанный промпт только после успешной отправки
+        remove_first_prompt()
 
 if __name__ == "__main__":
     main()
